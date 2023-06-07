@@ -1,8 +1,9 @@
 ---
 layout: post
 title:  "Kth Smallest Element in Sorted Matrix"
-date:   2022-02-20 21:34:31 +0800
-categories: algorithm dichotomy
+date:   2023-06-07 19:05:31 +0800
+categories: algorithm
+tags: dichotomy k-way-merge-sort
 ---
 
 # 问题描述
