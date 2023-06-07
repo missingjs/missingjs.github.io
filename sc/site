@@ -1,0 +1,130 @@
+#!/bin/bash
+
+usage()
+{
+    local cmd=$(basename $0)
+    cat <<EOF
+usage:
+
+    $cmd c start|stop
+        start, stop working container
+
+
+    $cmd run [ARGS...]
+        run commands in the container
+
+    $cmd j <ARGS...>
+        equivalent to $cmd run bundle exec jekyll <ARGS...>
+
+    $cmd rm image|container|all
+        remove image, container, or both
+
+EOF
+    exit 1
+}
+
+self_dir=$(cd $(dirname $0) && pwd)
+proj_dir=$(git rev-parse --show-toplevel)
+
+image_name="missingjs-blog-site-image"
+container_name="missingjs-blog-site"
+remote_user_name=missingjs
+remote_project_path="/project/missingjs.github.io"
+
+cmd=$1
+
+function create_image()
+{
+    local docker_file=$proj_dir/docker/Dockerfile
+    docker build -t $image_name:latest -f $docker_file .
+}
+
+function start_container()
+{
+    # check image exists
+    if ! docker image ls --all | grep -q $image_name; then
+        create_image || exit
+    fi
+
+    # check container exists
+    if ! docker container ls --all | grep -q $container_name; then
+        # create container
+        docker run \
+            -d -it \
+            --privileged \
+            --name $container_name \
+            --network host \
+            -v "/etc/timezone:/etc/timezone:ro" \
+            -v "/etc/localtime:/etc/localtime:ro" \
+            -v "$proj_dir:$remote_project_path" \
+            -w $remote_project_path \
+            $image_name
+
+        # init group and user
+        user_id=$(id -u)
+        group_id=$(id -g)
+        docker exec -it $container_name \
+            $remote_project_path/sc/init-user.sh \
+                -n $remote_user_name \
+                -u $user_id \
+                -g $group_id
+
+        # execute post commands
+        docker exec -it \
+            -u $remote_user_name \
+            -w $remote_project_path \
+            $container_name \
+            /bin/bash sc/post-install.sh
+    fi
+}
+
+function stop_container()
+{
+    docker container stop -t 1 $container_name
+}
+
+function remove_object()
+{
+    local obj="$1"
+    if [ "$obj" == "container" -o "$obj" == "all" ]; then
+        stop_container
+        docker container rm $container_name
+    fi
+
+    if [ "$obj" == "image" -o "$obj" == "all" ]; then
+        docker image rm $image_name
+    fi
+}
+
+function run_commands()
+{
+    docker exec -it -u $remote_user_name $container_name "$@"
+}
+
+case $cmd in
+    c)
+        if [ "$2" == "start" ]; then
+            start_container
+        elif [ "$2" == "stop" ]; then
+            stop_container
+        else
+            usage
+        fi
+        ;;
+    run)
+        shift
+        run_commands "$@"
+        ;;
+    j)
+        shift
+        run_commands bundle exec jekyll "$@"
+        ;;
+    rm)
+        shift
+        remove_object "$@"
+        ;;
+    *)
+        usage
+        ;;
+esac
+
